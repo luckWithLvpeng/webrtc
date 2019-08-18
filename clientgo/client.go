@@ -13,11 +13,13 @@ import (
 	gosocketio "github.com/graarh/golang-socketio"
 
 	"clientgo/ivfreader"
+	"clientgo/ivfwriter"
 
 	"github.com/graarh/golang-socketio/transport"
 	"github.com/nareix/joy4/av/avutil"
 	"github.com/nareix/joy4/av/pubsub"
 	"github.com/nareix/joy4/format/rtmp"
+	"github.com/pion/rtcp"
 	webrtc "github.com/pion/webrtc/v2"
 	media "github.com/pion/webrtc/v2/pkg/media"
 )
@@ -78,6 +80,7 @@ var (
 	clientsStatusLock sync.Mutex
 	createRoomTimer   *time.Timer
 	VideoTrack        *webrtc.Track
+	ivfFile           *ivfwriter.IVFWriter
 )
 
 const (
@@ -264,6 +267,25 @@ func createPeerConnection(clientID string) error {
 			//	UsernameFragment: ICECandidate.UsernameFragment,
 			//})
 		})
+		peerConnection.OnTrack(func(track *webrtc.Track, receiver *webrtc.RTPReceiver) {
+			// Send a PLI on an interval so that the publisher is pushing a keyframe every rtcpPLIInterval
+			fmt.Println("111")
+			go func() {
+				ticker := time.NewTicker(time.Second * 3)
+				for range ticker.C {
+					errSend := peerConnection.WriteRTCP([]rtcp.Packet{&rtcp.PictureLossIndication{MediaSSRC: track.SSRC()}})
+					if errSend != nil {
+						fmt.Println(errSend)
+					}
+				}
+			}()
+
+			codec := track.Codec()
+			if codec.Name == webrtc.VP8 {
+				fmt.Println("Got VP8 track, saving to disk as output.ivf")
+				saveToDisk(ivfFile, track)
+			}
+		})
 		addStream(peerConnection, clientID)
 		pcsLock.Lock()
 		pcs[clientID] = peerConnection
@@ -273,14 +295,21 @@ func createPeerConnection(clientID string) error {
 	return nil
 }
 
-//删除客户端
-func delClient(clientID string) {
-	tmpPC := pcs[clientID]
-	if tmpPC != nil {
-		pcsLock.Lock()
-		tmpPC.Close()
-		delete(pcs, clientID)
-		pcsLock.Unlock()
+func saveToDisk(i media.Writer, track *webrtc.Track) {
+	defer func() {
+		if err := i.Close(); err != nil {
+			panic(err)
+		}
+	}()
+
+	for {
+		rtpPacket, err := track.ReadRTP()
+		if err != nil {
+			panic(err)
+		}
+		if err := i.WriteRTP(rtpPacket); err != nil {
+			panic(err)
+		}
 	}
 }
 
@@ -288,8 +317,8 @@ func addStream(peerConnection *webrtc.PeerConnection, clientID string) {
 	// 没有则先创建这个通道视频
 	if VideoTrack == nil {
 		VideoTrack, err = peerConnection.NewTrack(webrtc.DefaultPayloadTypeVP8, rand.Uint32(), mac, mac)
-		// 	go playVideo()
-		go listenRTMPStream()
+		go playVideo()
+		//go listenRTMPStream()
 		if err != nil {
 			sendErrorToClient(err, clientID)
 		}
@@ -311,7 +340,7 @@ func sendErrorToClient(err error, clientID string) {
 
 func playVideo() {
 	// Open a IVF file and start reading using our IVFReader
-	file, ivfErr := os.Open("output.ivf")
+	file, ivfErr := os.Open("test.ivf")
 	if ivfErr != nil {
 		panic(ivfErr)
 	}
@@ -385,9 +414,11 @@ func listenRTMPStream() {
 }
 
 func main() {
+
+	ivfFile, _ = ivfwriter.New("output.ivf")
 	// 启动wertc
 	if true {
-		//		connect()
+		connect()
 	}
 
 	go listenRTMPStream()

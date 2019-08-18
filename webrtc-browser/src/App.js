@@ -31,6 +31,7 @@ class App extends Component {
     pcs: {},
     mac: "",
     sdp: "",
+    localStream: null
 
   }
 
@@ -103,6 +104,9 @@ class App extends Component {
     // pc.onaddstream = this.handleRemoteStreamAdded.bind(this);
     // pc.onremovestream = this.handleRemoteStreamRemoved.bind(this);
     pc.ontrack = this.onTrack.bind(this);
+    if (this.state.localStream) {
+      pc.addStream(this.state.localStream)
+    }
     this.doCall(pc,macAddr)
     this.setState({
       pcs: {
@@ -138,10 +142,16 @@ class App extends Component {
     //   flvPlayer.play();
     // }
 
-
-
-
     var self = this;
+    navigator.mediaDevices.getUserMedia({ video: true })
+        .then(stream => {
+          document.getElementById('video1').srcObject = stream
+          this.setState({localStream: stream})
+          // pc.addStream()
+          // pc.createOffer().then(d => pc.setLocalDescription(d))
+        })
+
+
     this.socket = io('ws://127.0.0.1:10900');
     //
     this.socket.on('connect', function () {
@@ -196,15 +206,18 @@ class App extends Component {
           {/*    width = "800px"*/}
           {/*    isMuted={true}*/}
           {/*/>*/}
-          <video  id={"player"}></video>
+
           <h1>推流demo </h1>
           <aside>{this.state.status}</aside>
           <aside>{this.state.room}</aside>
+          <div>摄像头</div>
+          <div>
+            <video id="video1" width="400" height="300" autoPlay muted style={{margin:"auto"}}></video>
+          </div>
+          <br/><br/>
+          <button disabled={!this.state.ready} onClick={() => this.startConnect()}> 推流并获取视频</button>
+          <br/><br/><br/>
           <div id={"status"}></div>
-          <br/><br/><br/><br/><br/>
-          <button disabled={!this.state.ready} onClick={() => this.startConnect()}> 连接盒子视频</button>
-
-          <br/><br/><br/><br/>
           <div id={"remoteVideos"}></div>
         </div>
     );
