@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math/rand"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"clientgo/ivfwriter"
 
 	"github.com/graarh/golang-socketio/transport"
+	"github.com/nareix/joy4/av"
 	"github.com/nareix/joy4/av/avutil"
 	"github.com/nareix/joy4/av/pubsub"
 	"github.com/nareix/joy4/format/rtmp"
@@ -406,30 +408,28 @@ func listenRTMPStream() {
 			return
 		}
 
-		//pkg, _ := conn.ReadPacket()
-		//fmt.Println(pkg.Data)
-		//for {
-		//	var pkt av.Packet
-		//	if pkt, err = conn.ReadPacket(); err != nil {
-		//		if err == io.EOF {
-		//			break
-		//		}
-		//		return
-		//	}
-		//	fmt.Println(pkt.Time)
-		//	fmt.Println(VideoTrack)
-		//	if VideoTrack != nil {
-		//		fmt.Println(pkt.IsKeyFrame)
-		//		var samples uint32
-		//		samples = uint32(videoClockRate * (float32(pkt.CompositionTime) / 1000000000))
-		//		if ivfErr := VideoTrack.WriteSample(media.Sample{Data: pkt.Data, Samples: samples}); ivfErr != nil {
-		//			//	panic(ivfErr)
-		//			fmt.Println(pkt.Time)
-		//			fmt.Println(len(pkt.Data))
-		//		}
-		//	}
-		//}
-		avutil.CopyPackets(ch.que, conn)
+		for {
+			var pkt av.Packet
+			if pkt, err = conn.ReadPacket(); err != nil {
+				if err == io.EOF {
+					break
+				}
+				return
+			}
+			fmt.Println(pkt.Time)
+			fmt.Println(VideoTrack)
+			if VideoTrack != nil {
+				fmt.Println(pkt.IsKeyFrame)
+				// var samples uint32
+				// samples = uint32(videoClockRate * (float32(pkt.CompositionTime) / 1000000000))
+				if ivfErr := VideoTrack.WriteSample(media.Sample{Data: pkt.Data, Samples: 90000}); ivfErr != nil {
+					//	panic(ivfErr)
+					fmt.Println(pkt.Time)
+					fmt.Println(len(pkt.Data))
+				}
+			}
+		}
+		// avutil.CopyPackets(ch.que, conn)
 
 		l.Lock()
 		delete(channels, conn.URL.Path)
