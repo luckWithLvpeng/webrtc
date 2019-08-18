@@ -317,7 +317,7 @@ func addStream(peerConnection *webrtc.PeerConnection, clientID string) {
 	// 没有则先创建这个通道视频
 	if VideoTrack == nil {
 		VideoTrack, err = peerConnection.NewTrack(webrtc.DefaultPayloadTypeVP8, rand.Uint32(), mac, mac)
-		go playVideo()
+		//go playVideo()
 		//go listenRTMPStream()
 		if err != nil {
 			sendErrorToClient(err, clientID)
@@ -374,6 +374,7 @@ func listenRTMPStream() {
 	}
 	channels := map[string]*Channel{}
 	server.HandlePlay = func(conn *rtmp.Conn) {
+		fmt.Println("play")
 		l.RLock()
 		ch := channels[conn.URL.Path]
 		l.RUnlock()
@@ -385,6 +386,8 @@ func listenRTMPStream() {
 
 	server.HandlePublish = func(conn *rtmp.Conn) {
 		streams, _ := conn.Streams()
+
+		fmt.Println("publish")
 
 		l.Lock()
 		fmt.Println("request string->", conn.URL.RequestURI())
@@ -403,6 +406,29 @@ func listenRTMPStream() {
 			return
 		}
 
+		//pkg, _ := conn.ReadPacket()
+		//fmt.Println(pkg.Data)
+		//for {
+		//	var pkt av.Packet
+		//	if pkt, err = conn.ReadPacket(); err != nil {
+		//		if err == io.EOF {
+		//			break
+		//		}
+		//		return
+		//	}
+		//	fmt.Println(pkt.Time)
+		//	fmt.Println(VideoTrack)
+		//	if VideoTrack != nil {
+		//		fmt.Println(pkt.IsKeyFrame)
+		//		var samples uint32
+		//		samples = uint32(videoClockRate * (float32(pkt.CompositionTime) / 1000000000))
+		//		if ivfErr := VideoTrack.WriteSample(media.Sample{Data: pkt.Data, Samples: samples}); ivfErr != nil {
+		//			//	panic(ivfErr)
+		//			fmt.Println(pkt.Time)
+		//			fmt.Println(len(pkt.Data))
+		//		}
+		//	}
+		//}
 		avutil.CopyPackets(ch.que, conn)
 
 		l.Lock()
@@ -410,6 +436,7 @@ func listenRTMPStream() {
 		l.Unlock()
 		ch.que.Close()
 	}
+	server.ListenAndServe()
 
 }
 
