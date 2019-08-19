@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"math/rand"
 	"os"
@@ -17,10 +16,6 @@ import (
 	"clientgo/ivfwriter"
 
 	"github.com/graarh/golang-socketio/transport"
-	"github.com/nareix/joy4/av"
-	"github.com/nareix/joy4/av/avutil"
-	"github.com/nareix/joy4/av/pubsub"
-	"github.com/nareix/joy4/format/rtmp"
 	"github.com/pion/rtcp"
 	webrtc "github.com/pion/webrtc/v2"
 	media "github.com/pion/webrtc/v2/pkg/media"
@@ -271,7 +266,6 @@ func createPeerConnection(clientID string) error {
 		})
 		peerConnection.OnTrack(func(track *webrtc.Track, receiver *webrtc.RTPReceiver) {
 			// Send a PLI on an interval so that the publisher is pushing a keyframe every rtcpPLIInterval
-			fmt.Println("111")
 			go func() {
 				ticker := time.NewTicker(time.Second * 3)
 				for range ticker.C {
@@ -300,17 +294,17 @@ func createPeerConnection(clientID string) error {
 func saveToDisk(i media.Writer, track *webrtc.Track) {
 	defer func() {
 		if err := i.Close(); err != nil {
-			panic(err)
+			//panic(err)
 		}
 	}()
 
 	for {
 		rtpPacket, err := track.ReadRTP()
 		if err != nil {
-			panic(err)
+			//panic(err)
 		}
 		if err := i.WriteRTP(rtpPacket); err != nil {
-			panic(err)
+			//panic(err)
 		}
 	}
 }
@@ -320,7 +314,6 @@ func addStream(peerConnection *webrtc.PeerConnection, clientID string) {
 	if VideoTrack == nil {
 		VideoTrack, err = peerConnection.NewTrack(webrtc.DefaultPayloadTypeVP8, rand.Uint32(), mac, mac)
 		go playVideo()
-		//go listenRTMPStream()
 		if err != nil {
 			sendErrorToClient(err, clientID)
 		}
@@ -344,12 +337,12 @@ func playVideo() {
 	// Open a IVF file and start reading using our IVFReader
 	file, ivfErr := os.Open("test.ivf")
 	if ivfErr != nil {
-		panic(ivfErr)
+		//panic(ivfErr)
 	}
 
 	ivf, header, ivfErr := ivfreader.NewWith(file)
 	if ivfErr != nil {
-		panic(ivfErr)
+		//panic(ivfErr)
 	}
 
 	// Send our video file frame at a time. Pace our sending so we send it at the same speed it should be played back as.
@@ -358,87 +351,87 @@ func playVideo() {
 	for {
 		frame, _, ivfErr := ivf.ParseNextFrame()
 		if ivfErr != nil {
-			panic(ivfErr)
+			//panic(ivfErr)
 		}
 
 		time.Sleep(sleepTime)
 		if ivfErr = VideoTrack.WriteSample(media.Sample{Data: frame, Samples: 90000}); ivfErr != nil {
-			panic(ivfErr)
+			//panic(ivfErr)
 		}
 	}
 }
 
-func listenRTMPStream() {
-	server := &rtmp.Server{}
-	l := &sync.RWMutex{}
-	type Channel struct {
-		que *pubsub.Queue
-	}
-	channels := map[string]*Channel{}
-	server.HandlePlay = func(conn *rtmp.Conn) {
-		fmt.Println("play")
-		l.RLock()
-		ch := channels[conn.URL.Path]
-		l.RUnlock()
-		if ch != nil {
-			cursor := ch.que.Latest()
-			avutil.CopyFile(conn, cursor)
-		}
-	}
+//func listenRTMPStream() {
+//	server := &rtmp.Server{}
+//	l := &sync.RWMutex{}
+//	type Channel struct {
+//		que *pubsub.Queue
+//	}
+//	channels := map[string]*Channel{}
+//	server.HandlePlay = func(conn *rtmp.Conn) {
+//		fmt.Println("play")
+//		l.RLock()
+//		ch := channels[conn.URL.Path]
+//		l.RUnlock()
+//		if ch != nil {
+//			cursor := ch.que.Latest()
+//			avutil.CopyFile(conn, cursor)
+//		}
+//	}
 
-	server.HandlePublish = func(conn *rtmp.Conn) {
-		streams, _ := conn.Streams()
+//	server.HandlePublish = func(conn *rtmp.Conn) {
+//		streams, _ := conn.Streams()
 
-		fmt.Println("publish")
+//		fmt.Println("publish")
 
-		l.Lock()
-		fmt.Println("request string->", conn.URL.RequestURI())
-		fmt.Println("request key->", conn.URL.Query().Get("key"))
-		ch := channels[conn.URL.Path]
-		if ch == nil {
-			ch = &Channel{}
-			ch.que = pubsub.NewQueue()
-			ch.que.WriteHeader(streams)
-			channels[conn.URL.Path] = ch
-		} else {
-			ch = nil
-		}
-		l.Unlock()
-		if ch == nil {
-			return
-		}
+//		l.Lock()
+//		fmt.Println("request string->", conn.URL.RequestURI())
+//		fmt.Println("request key->", conn.URL.Query().Get("key"))
+//		ch := channels[conn.URL.Path]
+//		if ch == nil {
+//			ch = &Channel{}
+//			ch.que = pubsub.NewQueue()
+//			ch.que.WriteHeader(streams)
+//			channels[conn.URL.Path] = ch
+//		} else {
+//			ch = nil
+//		}
+//		l.Unlock()
+//		if ch == nil {
+//			return
+//		}
 
-		for {
-			var pkt av.Packet
-			if pkt, err = conn.ReadPacket(); err != nil {
-				if err == io.EOF {
-					break
-				}
-				return
-			}
-			fmt.Println(pkt.Time)
-			fmt.Println(VideoTrack)
-			if VideoTrack != nil {
-				fmt.Println(pkt.IsKeyFrame)
-				// var samples uint32
-				// samples = uint32(videoClockRate * (float32(pkt.CompositionTime) / 1000000000))
-				if ivfErr := VideoTrack.WriteSample(media.Sample{Data: pkt.Data, Samples: 90000}); ivfErr != nil {
-					//	panic(ivfErr)
-					fmt.Println(pkt.Time)
-					fmt.Println(len(pkt.Data))
-				}
-			}
-		}
-		// avutil.CopyPackets(ch.que, conn)
+//		for {
+//			var pkt av.Packet
+//			if pkt, err = conn.ReadPacket(); err != nil {
+//				if err == io.EOF {
+//					break
+//				}
+//				return
+//			}
+//			fmt.Println(pkt.Time)
+//			fmt.Println(VideoTrack)
+//			if VideoTrack != nil {
+//				fmt.Println(pkt.IsKeyFrame)
+//				// var samples uint32
+//				// samples = uint32(videoClockRate * (float32(pkt.CompositionTime) / 1000000000))
+//				if ivfErr := VideoTrack.WriteSample(media.Sample{Data: pkt.Data, Samples: 90000}); ivfErr != nil {
+//					//	panic(ivfErr)
+//					fmt.Println(pkt.Time)
+//					fmt.Println(len(pkt.Data))
+//				}
+//			}
+//		}
+//		// avutil.CopyPackets(ch.que, conn)
 
-		l.Lock()
-		delete(channels, conn.URL.Path)
-		l.Unlock()
-		ch.que.Close()
-	}
-	server.ListenAndServe()
+//		l.Lock()
+//		delete(channels, conn.URL.Path)
+//		l.Unlock()
+//		ch.que.Close()
+//	}
+//	server.ListenAndServe()
 
-}
+//}
 
 func main() {
 
@@ -448,7 +441,7 @@ func main() {
 		connect()
 	}
 
-	go listenRTMPStream()
+	//go listenRTMPStream()
 	for true {
 		time.Sleep(time.Hour * 10)
 	}
