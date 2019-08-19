@@ -2,3 +2,4 @@
 channel/node_modules
 webrtc-browser/node_modules
 clientgo/output.ivf
+output*

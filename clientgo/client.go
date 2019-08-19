@@ -66,18 +66,12 @@ var (
 			// },
 		},
 	}
-	tracks        = make(map[int]*webrtc.Track)
-	pipelinesLock sync.Mutex
 	// 服务器ID
-	mac               = "123"
-	pcsLock           sync.Mutex
-	ClientsMap        = make(map[int][]string) //key 为channel id  value 为客户端id字符串数组
-	clientsMapLock    sync.Mutex
-	clientsStatus     = make(map[string]int) //key 为clientid
-	clientsStatusLock sync.Mutex
-	createRoomTimer   *time.Timer
-	VideoTrack        *webrtc.Track
-	ivfFile           *ivfwriter.IVFWriter
+	mac             = "123"
+	pcsLock         sync.Mutex
+	createRoomTimer *time.Timer
+	m               = webrtc.MediaEngine{}
+	api             *webrtc.API
 )
 
 const (
@@ -126,7 +120,7 @@ func connect() {
 	})
 	// 客户端请求建立连接
 	client.On("askToConnect", func(h *gosocketio.Channel, msg Message) {
-		err := createPeerConnection(msg.From)
+		err := createPeerConnection(msg.From, msg.Msg)
 		if err != nil {
 			client.Emit("messageToBrowser", Message{
 				Type: "error",
@@ -232,57 +226,73 @@ func connect() {
 	})
 }
 
-func createPeerConnection(clientID string) error {
+func createPeerConnection(clientID string, action string) error {
 	if pcs[clientID] == nil {
 		// 创建 pc
-		peerConnection, err := webrtc.NewPeerConnection(config)
+		//peerConnection, err := webrtc.NewPeerConnection(config)
+		peerConnection, err := api.NewPeerConnection(config)
 		if err != nil {
 			return err
 		}
+		ivfFile, _ := ivfwriter.New("output-" + clientID + ".ivf")
 		peerConnection.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
-			//打印 ice 状态的变化
-			log.Println(fmt.Sprintf("Connection State has changed %s", connectionState.String()))
-			switch connectionState.String() {
-			case "connected":
-			// case "failed":
-			// callClientsUseRtmpById()
-			case "disconnected":
-				peerConnection.Close()
-			}
-			// // 当远程pc 失去连接 ,关闭本地客户端，清除数据
-			// if connectionState.String() == "disconnected" {
-			// 	peerConnection.Close()
-			// }
-		})
-		peerConnection.OnICECandidate(func(ICECandidate *webrtc.ICECandidate) {
+			fmt.Printf("Connection State has changed %s \n", connectionState.String())
 
-			//client.Emit("messageToBrowser",Message{
-			//	Type: "candidate",
-			//	Candidate:        ICECandidate.Candidate,
-			//	SDPMid:           ICECandidate.SDPMid,
-			//	SDPMLineIndex:    ICECandidate.SDPMLineIndex,
-			//	UsernameFragment: ICECandidate.UsernameFragment,
-			//})
-		})
-		peerConnection.OnTrack(func(track *webrtc.Track, receiver *webrtc.RTPReceiver) {
-			// Send a PLI on an interval so that the publisher is pushing a keyframe every rtcpPLIInterval
-			go func() {
-				ticker := time.NewTicker(time.Second * 3)
-				for range ticker.C {
-					errSend := peerConnection.WriteRTCP([]rtcp.Packet{&rtcp.PictureLossIndication{MediaSSRC: track.SSRC()}})
-					if errSend != nil {
-						fmt.Println(errSend)
-					}
+			if connectionState == webrtc.ICEConnectionStateConnected {
+				fmt.Println("Ctrl+C the remote client to stop the demo")
+			} else if connectionState == webrtc.ICEConnectionStateFailed ||
+				connectionState == webrtc.ICEConnectionStateDisconnected {
+
+				closeErr := ivfFile.Close()
+				if closeErr != nil {
+					panic(closeErr)
+
 				}
-			}()
 
-			codec := track.Codec()
-			if codec.Name == webrtc.VP8 {
-				fmt.Println("Got VP8 track, saving to disk as output.ivf")
-				saveToDisk(ivfFile, track)
+				fmt.Println("Done writing media files")
+				os.Exit(0)
 			}
 		})
-		addStream(peerConnection, clientID)
+		if action == "push to file" {
+			// Allow us to receive 1 audio track, and 1 video track
+			if _, err = peerConnection.AddTransceiver(webrtc.RTPCodecTypeAudio); err != nil {
+				panic(err)
+			} else if _, err = peerConnection.AddTransceiver(webrtc.RTPCodecTypeVideo); err != nil {
+				panic(err)
+			}
+			peerConnection.OnTrack(func(track *webrtc.Track, receiver *webrtc.RTPReceiver) {
+				// Send a PLI on an interval so that the publisher is pushing a keyframe every rtcpPLIInterval
+				go func() {
+					ticker := time.NewTicker(time.Second * 3)
+					for range ticker.C {
+						errSend := peerConnection.WriteRTCP([]rtcp.Packet{&rtcp.PictureLossIndication{MediaSSRC: track.SSRC()}})
+						if errSend != nil {
+							fmt.Println(errSend)
+						}
+					}
+				}()
+
+				codec := track.Codec()
+				if codec.Name == webrtc.VP8 {
+					fmt.Println("Got VP8 track, saving to disk as output-" + clientID + ".ivf")
+					saveToDisk(ivfFile, track)
+				}
+			})
+		}
+		//addStream(peerConnection, clientID)
+		if action == "pull from file" {
+			fmt.Println("pull")
+			VideoTrack, err := peerConnection.NewTrack(webrtc.DefaultPayloadTypeVP8, rand.Uint32(), mac, mac)
+			if err != nil {
+				sendErrorToClient(err, clientID)
+			}
+			go playVideo(VideoTrack)
+			_, err = peerConnection.AddTrack(VideoTrack)
+			if err != nil {
+				sendErrorToClient(err, clientID)
+			}
+
+		}
 		pcsLock.Lock()
 		pcs[clientID] = peerConnection
 		pcsLock.Unlock()
@@ -311,13 +321,11 @@ func saveToDisk(i media.Writer, track *webrtc.Track) {
 
 func addStream(peerConnection *webrtc.PeerConnection, clientID string) {
 	// 没有则先创建这个通道视频
-	if VideoTrack == nil {
-		VideoTrack, err = peerConnection.NewTrack(webrtc.DefaultPayloadTypeVP8, rand.Uint32(), mac, mac)
-		go playVideo()
-		if err != nil {
-			sendErrorToClient(err, clientID)
-		}
+	VideoTrack, err := peerConnection.NewTrack(webrtc.DefaultPayloadTypeVP8, rand.Uint32(), mac, mac)
+	if err != nil {
+		sendErrorToClient(err, clientID)
 	}
+	go playVideo(VideoTrack)
 	_, err = peerConnection.AddTrack(VideoTrack)
 	if err != nil {
 		sendErrorToClient(err, clientID)
@@ -333,7 +341,7 @@ func sendErrorToClient(err error, clientID string) {
 	})
 }
 
-func playVideo() {
+func playVideo(VideoTrack *webrtc.Track) {
 	// Open a IVF file and start reading using our IVFReader
 	file, ivfErr := os.Open("test.ivf")
 	if ivfErr != nil {
@@ -361,87 +369,20 @@ func playVideo() {
 	}
 }
 
-//func listenRTMPStream() {
-//	server := &rtmp.Server{}
-//	l := &sync.RWMutex{}
-//	type Channel struct {
-//		que *pubsub.Queue
-//	}
-//	channels := map[string]*Channel{}
-//	server.HandlePlay = func(conn *rtmp.Conn) {
-//		fmt.Println("play")
-//		l.RLock()
-//		ch := channels[conn.URL.Path]
-//		l.RUnlock()
-//		if ch != nil {
-//			cursor := ch.que.Latest()
-//			avutil.CopyFile(conn, cursor)
-//		}
-//	}
-
-//	server.HandlePublish = func(conn *rtmp.Conn) {
-//		streams, _ := conn.Streams()
-
-//		fmt.Println("publish")
-
-//		l.Lock()
-//		fmt.Println("request string->", conn.URL.RequestURI())
-//		fmt.Println("request key->", conn.URL.Query().Get("key"))
-//		ch := channels[conn.URL.Path]
-//		if ch == nil {
-//			ch = &Channel{}
-//			ch.que = pubsub.NewQueue()
-//			ch.que.WriteHeader(streams)
-//			channels[conn.URL.Path] = ch
-//		} else {
-//			ch = nil
-//		}
-//		l.Unlock()
-//		if ch == nil {
-//			return
-//		}
-
-//		for {
-//			var pkt av.Packet
-//			if pkt, err = conn.ReadPacket(); err != nil {
-//				if err == io.EOF {
-//					break
-//				}
-//				return
-//			}
-//			fmt.Println(pkt.Time)
-//			fmt.Println(VideoTrack)
-//			if VideoTrack != nil {
-//				fmt.Println(pkt.IsKeyFrame)
-//				// var samples uint32
-//				// samples = uint32(videoClockRate * (float32(pkt.CompositionTime) / 1000000000))
-//				if ivfErr := VideoTrack.WriteSample(media.Sample{Data: pkt.Data, Samples: 90000}); ivfErr != nil {
-//					//	panic(ivfErr)
-//					fmt.Println(pkt.Time)
-//					fmt.Println(len(pkt.Data))
-//				}
-//			}
-//		}
-//		// avutil.CopyPackets(ch.que, conn)
-
-//		l.Lock()
-//		delete(channels, conn.URL.Path)
-//		l.Unlock()
-//		ch.que.Close()
-//	}
-//	server.ListenAndServe()
-
-//}
-
 func main() {
 
-	ivfFile, _ = ivfwriter.New("output.ivf")
+	// Setup the codecs you want to use.
+	// We'll use a VP8 codec but you can also define your own
+	m.RegisterCodec(webrtc.NewRTPOpusCodec(webrtc.DefaultPayloadTypeOpus, 48000))
+	m.RegisterCodec(webrtc.NewRTPVP8Codec(webrtc.DefaultPayloadTypeVP8, 90000))
+
+	// Create the API object with the MediaEngine
+	api = webrtc.NewAPI(webrtc.WithMediaEngine(m))
 	// 启动wertc
 	if true {
 		connect()
 	}
 
-	//go listenRTMPStream()
 	for true {
 		time.Sleep(time.Hour * 10)
 	}
