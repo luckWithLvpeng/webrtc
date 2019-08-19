@@ -319,7 +319,7 @@ func addStream(peerConnection *webrtc.PeerConnection, clientID string) {
 	// 没有则先创建这个通道视频
 	if VideoTrack == nil {
 		VideoTrack, err = peerConnection.NewTrack(webrtc.DefaultPayloadTypeVP8, rand.Uint32(), mac, mac)
-		//go playVideo()
+		go playVideo()
 		//go listenRTMPStream()
 		if err != nil {
 			sendErrorToClient(err, clientID)
