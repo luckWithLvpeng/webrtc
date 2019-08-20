@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math/rand"
 	"os"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/graarh/golang-socketio/transport"
 	"github.com/pion/rtcp"
+	"github.com/pion/rtp"
 	webrtc "github.com/pion/webrtc/v2"
 	media "github.com/pion/webrtc/v2/pkg/media"
 )
@@ -72,6 +74,8 @@ var (
 	createRoomTimer *time.Timer
 	m               = webrtc.MediaEngine{}
 	api             *webrtc.API
+	localTrack      *webrtc.Track
+	firstPush       bool
 )
 
 const (
@@ -253,7 +257,7 @@ func createPeerConnection(clientID string, action string) error {
 				os.Exit(0)
 			}
 		})
-		if action == "push to file" {
+		if action == "push to file and stream" {
 			// Allow us to receive 1 audio track, and 1 video track
 			if _, err = peerConnection.AddTransceiver(webrtc.RTPCodecTypeAudio); err != nil {
 				panic(err)
@@ -271,13 +275,27 @@ func createPeerConnection(clientID string, action string) error {
 						}
 					}
 				}()
-
+				if localTrack == nil {
+					localTrack, _ = peerConnection.NewTrack(track.PayloadType(), track.SSRC(), "video", "pion")
+				}
 				codec := track.Codec()
 				if codec.Name == webrtc.VP8 {
 					fmt.Println("Got VP8 track, saving to disk as output-" + clientID + ".ivf")
-					saveToDisk(ivfFile, track)
+					saveToDiskAndAddtoLocaltrack(ivfFile, track)
 				}
 			})
+		}
+		//addStream(peerConnection, clientID)
+		if action == "pull from stream" {
+			fmt.Println("pull from stream")
+			if err != nil {
+				sendErrorToClient(err, clientID)
+			}
+			_, err = peerConnection.AddTrack(localTrack)
+			if err != nil {
+				sendErrorToClient(err, clientID)
+			}
+
 		}
 		//addStream(peerConnection, clientID)
 		if action == "pull from file" {
@@ -301,18 +319,42 @@ func createPeerConnection(clientID string, action string) error {
 	return nil
 }
 
-func saveToDisk(i media.Writer, track *webrtc.Track) {
+func saveToDiskAndAddtoLocaltrack(i media.Writer, track *webrtc.Track) {
 	defer func() {
 		if err := i.Close(); err != nil {
 			//panic(err)
 		}
 	}()
 
+	rtpBuf := make([]byte, 8192)
 	for {
-		rtpPacket, err := track.ReadRTP()
+		n, err := track.Read(rtpBuf)
 		if err != nil {
-			//panic(err)
+			fmt.Println("读取视频帧数据Error", err)
 		}
+		// ErrClosedPipe means we don't have any subscribers, this is ok if no peers have connected yet
+		if _, err = localTrack.Write(rtpBuf[:n]); err != nil && err != io.ErrClosedPipe {
+			//panic(err)
+			fmt.Println("流分发出错Error", err)
+		}
+		rtpPacket := &rtp.Packet{}
+		if err := rtpPacket.Unmarshal(rtpBuf[:n]); err != nil {
+			fmt.Println("解析视频数据Error", err)
+		}
+
+		// rtpPacket, err := track.ReadRTP()
+		// if err != nil {
+		// 	panic(err)
+		// }
+		// if firstPush == false {
+		// 	// 流分发
+		// 	if err = localTrack.WriteRTP(rtpPacket); err != nil && err != io.ErrClosedPipe {
+		// 		// panic(err)
+		// 		fmt.Println("流分发出错", err)
+		// 	}
+		// 	firstPush = true
+		// }
+		// 保存视频文件
 		if err := i.WriteRTP(rtpPacket); err != nil {
 			//panic(err)
 		}

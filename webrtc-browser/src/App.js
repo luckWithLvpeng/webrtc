@@ -82,7 +82,7 @@ class App extends Component {
             // console.log(pc.iceConnectionState())
             document.querySelector("div#status").innerHTML += pc.iceConnectionState + "<br>"
         };
-        if (this.state.action !== "push to file") {
+        if (this.state.action !== "push to file and stream") {
             pc.ontrack = this.onTrack.bind(this);
         }
         if (this.state.localStream) {
@@ -116,8 +116,6 @@ class App extends Component {
     componentDidMount() {
 
         var self = this;
-
-
 
         this.socket = io('ws://127.0.0.1:10900');
         //
@@ -166,7 +164,7 @@ class App extends Component {
     render() {
         return (
             <div className="App">
-                <h1>推流demo </h1>
+                <h1>推流或者拉流demo </h1>
                 <aside>{this.state.status}</aside>
                 <aside>{this.state.room}</aside>
                 {
@@ -181,7 +179,7 @@ class App extends Component {
                                     .then(stream => {
                                         document.getElementById('video').srcObject = stream
                                         self.setState({localStream: stream})
-                                        self.startConnect("push to file")
+                                        self.startConnect("push to file and stream")
 
                                     })
 
