@@ -57,6 +57,8 @@ github.com/pion/datachannel v1.4.5 h1:paz18kYAetpTdK8tlMAtDY+Ayxrv5fndZ5XPZwiZHr
 github.com/pion/datachannel v1.4.5/go.mod h1:SpMJbuu8v+qbA94m6lWQwSdCf8JKQvgmdSHDNtcbe+w=
 github.com/pion/dtls v1.5.0 h1:GtN3DJ0Fv5wC/Y04uOXT1zPeGA4C3HrsP1aAKsIBiU8=
 github.com/pion/dtls v1.5.0/go.mod h1:CjlPLfQdsTg3G4AEXjJp8FY5bRweBlxHrgoFrN+fQsk=
+github.com/pion/example-webrtc-applications v0.0.0-20190604070431-3e5c7b4f5cc7 h1:DdfMCvgKuEx02ZldtMDotV/zDgwUJ4vHsj++ueMiC54=
+github.com/pion/example-webrtc-applications v0.0.0-20190604070431-3e5c7b4f5cc7/go.mod h1:5sIcfsVO+J5PUFJu6q62ERdP030pcZLQaO3mkEyLIWo=
 github.com/pion/ice v0.5.7 h1:1ZhyuFkwo0Nup7cRplz72ulghFXnZSpocD5YVJP90yg=
 github.com/pion/ice v0.5.7/go.mod h1:FSTDLP+ian3PtxRjervtyDP2AOqt2c6cvfebZ7dwLnI=
 github.com/pion/logging v0.2.1/go.mod h1:k0/tDVsRCX2Mb2ZEmTqNa7CWsQPc+YYCB7Q+5pahoms=

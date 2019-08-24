@@ -9,6 +9,7 @@ require (
 	github.com/gorilla/websocket v1.4.0 // indirect
 	github.com/graarh/golang-socketio v0.0.0-20170510162725-2c44953b9b5f
 	github.com/nareix/joy4 v0.0.0-20181022032202-3ddbc8f9d431
+	github.com/pion/example-webrtc-applications v0.0.0-20190604070431-3e5c7b4f5cc7
 	github.com/pion/rtcp v1.2.1
 	github.com/pion/rtp v1.1.3
 	github.com/pion/webrtc/v2 v2.1.2

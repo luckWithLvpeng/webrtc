@@ -8,11 +8,13 @@ import (
 	"log"
 	"math/rand"
 	"os"
+	"runtime"
 	"sync"
 	"time"
 
 	gosocketio "github.com/graarh/golang-socketio"
 
+	gst "clientgo/gstreamer-sink"
 	"clientgo/ivfreader"
 	"clientgo/ivfwriter"
 
@@ -233,12 +235,11 @@ func connect() {
 func createPeerConnection(clientID string, action string) error {
 	if pcs[clientID] == nil {
 		// 创建 pc
-		//peerConnection, err := webrtc.NewPeerConnection(config)
-		peerConnection, err := api.NewPeerConnection(config)
+		peerConnection, err := webrtc.NewPeerConnection(config)
+		//peerConnection, err := api.NewPeerConnection(config)
 		if err != nil {
 			return err
 		}
-		ivfFile, _ := ivfwriter.New("output-" + clientID + ".ivf")
 		peerConnection.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
 			fmt.Printf("Connection State has changed %s \n", connectionState.String())
 
@@ -247,22 +248,16 @@ func createPeerConnection(clientID string, action string) error {
 			} else if connectionState == webrtc.ICEConnectionStateFailed ||
 				connectionState == webrtc.ICEConnectionStateDisconnected {
 
-				closeErr := ivfFile.Close()
-				if closeErr != nil {
-					panic(closeErr)
-
-				}
-
-				fmt.Println("Done writing media files")
-				os.Exit(0)
+				fmt.Println("客户端", clientID, "---失去连接")
+				//os.Exit(0)
 			}
 		})
 		if action == "push to file and stream" {
 			// Allow us to receive 1 audio track, and 1 video track
 			if _, err = peerConnection.AddTransceiver(webrtc.RTPCodecTypeAudio); err != nil {
-				panic(err)
+				//	panic(err)
 			} else if _, err = peerConnection.AddTransceiver(webrtc.RTPCodecTypeVideo); err != nil {
-				panic(err)
+				//	panic(err)
 			}
 			peerConnection.OnTrack(func(track *webrtc.Track, receiver *webrtc.RTPReceiver) {
 				// Send a PLI on an interval so that the publisher is pushing a keyframe every rtcpPLIInterval
@@ -279,27 +274,67 @@ func createPeerConnection(clientID string, action string) error {
 					localTrack, _ = peerConnection.NewTrack(track.PayloadType(), track.SSRC(), "video", "pion")
 				}
 				codec := track.Codec()
+				fmt.Printf("Track has started, of type %d: %s \n", track.PayloadType(), codec.Name)
 				if codec.Name == webrtc.VP8 {
 					fmt.Println("Got VP8 track, saving to disk as output-" + clientID + ".ivf")
+					ivfFile, _ := ivfwriter.New("output-" + clientID + ".ivf")
 					saveToDiskAndAddtoLocaltrack(ivfFile, track)
 				}
 			})
 		}
-		//addStream(peerConnection, clientID)
+		if action == "push to rtmp" {
+			// Allow us to receive 1 audio track, and 2 video tracks
+			if _, err = peerConnection.AddTransceiver(webrtc.RTPCodecTypeAudio); err != nil {
+				panic(err)
+			} else if _, err = peerConnection.AddTransceiver(webrtc.RTPCodecTypeVideo); err != nil {
+				panic(err)
+			} else if _, err = peerConnection.AddTransceiver(webrtc.RTPCodecTypeVideo); err != nil {
+				panic(err)
+			}
+			peerConnection.OnTrack(func(track *webrtc.Track, receiver *webrtc.RTPReceiver) {
+				// Send a PLI on an interval so that the publisher is pushing a keyframe every rtcpPLIInterval
+				go func() {
+					ticker := time.NewTicker(time.Second * 3)
+					for range ticker.C {
+						errSend := peerConnection.WriteRTCP([]rtcp.Packet{&rtcp.PictureLossIndication{MediaSSRC: track.SSRC()}})
+						if errSend != nil {
+							fmt.Println(errSend)
+						}
+					}
+				}()
+				codec := track.Codec()
+				fmt.Printf("Track has started, of type %d: %s \n", track.PayloadType(), codec.Name)
+				pipeline := gst.CreatePipeline(codec.Name)
+				pipeline.Start()
+				buf := make([]byte, 1400)
+				for {
+					i, readErr := track.Read(buf)
+					fmt.Println("-----", i)
+					if readErr != nil {
+						panic(err)
+					}
+
+					pipeline.Push(buf[:i])
+				}
+			})
+
+		}
 		if action == "pull from stream" {
-			fmt.Println("pull from stream")
 			if err != nil {
 				sendErrorToClient(err, clientID)
 			}
-			_, err = peerConnection.AddTrack(localTrack)
-			if err != nil {
-				sendErrorToClient(err, clientID)
+			if localTrack != nil {
+				fmt.Println("pull from stream")
+				_, err = peerConnection.AddTrack(localTrack)
+				if err != nil {
+					fmt.Println("add pull stream error:", err)
+					sendErrorToClient(err, clientID)
+				}
 			}
 
 		}
-		//addStream(peerConnection, clientID)
 		if action == "pull from file" {
-			fmt.Println("pull")
+			fmt.Println("pull from file")
 			VideoTrack, err := peerConnection.NewTrack(webrtc.DefaultPayloadTypeVP8, rand.Uint32(), mac, mac)
 			if err != nil {
 				sendErrorToClient(err, clientID)
@@ -329,11 +364,12 @@ func saveToDiskAndAddtoLocaltrack(i media.Writer, track *webrtc.Track) {
 	rtpBuf := make([]byte, 8192)
 	for {
 		n, err := track.Read(rtpBuf)
+		fmt.Println("----", n)
 		if err != nil {
 			fmt.Println("读取视频帧数据Error", err)
 		}
 		// ErrClosedPipe means we don't have any subscribers, this is ok if no peers have connected yet
-		if _, err = localTrack.Write(rtpBuf[:n]); err != nil && err != io.ErrClosedPipe {
+		if _, err := localTrack.Write(rtpBuf[:n]); err != nil && err != io.ErrClosedPipe {
 			//panic(err)
 			fmt.Println("流分发出错Error", err)
 		}
@@ -341,22 +377,12 @@ func saveToDiskAndAddtoLocaltrack(i media.Writer, track *webrtc.Track) {
 		if err := rtpPacket.Unmarshal(rtpBuf[:n]); err != nil {
 			fmt.Println("解析视频数据Error", err)
 		}
-
-		// rtpPacket, err := track.ReadRTP()
-		// if err != nil {
-		// 	panic(err)
-		// }
-		// if firstPush == false {
-		// 	// 流分发
-		// 	if err = localTrack.WriteRTP(rtpPacket); err != nil && err != io.ErrClosedPipe {
-		// 		// panic(err)
-		// 		fmt.Println("流分发出错", err)
-		// 	}
-		// 	firstPush = true
-		// }
 		// 保存视频文件
 		if err := i.WriteRTP(rtpPacket); err != nil {
 			//panic(err)
+			fmt.Println("保存视频错误error", err)
+			i.Close()
+			fmt.Println("Done writing media files")
 		}
 	}
 }
@@ -411,6 +437,12 @@ func playVideo(VideoTrack *webrtc.Track) {
 	}
 }
 
+func init() {
+	// This example uses Gstreamer's autovideosink element to display the received video
+	// This element, along with some others, sometimes require that the process' main thread is used
+	runtime.LockOSThread()
+}
+
 func main() {
 
 	// Setup the codecs you want to use.
@@ -425,8 +457,8 @@ func main() {
 		connect()
 	}
 
-	for true {
-		time.Sleep(time.Hour * 10)
-	}
+	//gst.StartMainLoop()
+
+	select {}
 
 }
