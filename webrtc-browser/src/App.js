@@ -4,10 +4,6 @@ import io from 'socket.io-client'
 import 'webrtc-adapter'
 import 'toastr/build/toastr.min.css'
 import toastr from 'toastr'
-// import ReactPlayer from 'react-player'
-// import VideoPlayer from 'react-videojs-wrapper';
-// import {ReactFlvPlayer} from 'react-flv-player'
-// import flvjs from 'flv.js'
 
 var pcConfig = {
     'iceServers': [
@@ -61,7 +57,8 @@ class App extends Component {
 
     onTrack(event) {
         console.log("add stream")
-        var el = document.createElement(event.track.kind)
+        // var el = document.createElement(event.track.kind)
+        var el = document.getElementById("video")
         el.srcObject = event.streams[0]
         el.autoplay = true
         el.controls = true
@@ -82,14 +79,14 @@ class App extends Component {
             // console.log(pc.iceConnectionState())
             document.querySelector("div#status").innerHTML += pc.iceConnectionState + "<br>"
         };
-        if (this.state.action !== "push to file and stream") {
+        if (this.state.action !== "push to file and stream" && this.state.action !== "push to rtmp") {
             pc.ontrack = this.onTrack.bind(this);
         }
         if (this.state.localStream) {
             pc.addStream(this.state.localStream)
         }
         // 准备接收一路视频
-        pc.addTransceiver('video', {'direction': 'recvonly'})
+        // pc.addTransceiver('video', {'direction': 'recvonly'})
         this.doCall(pc, macAddr)
         this.setState({
             pcs: {
@@ -155,7 +152,6 @@ class App extends Component {
             // 发送请求，是否可以连接上视频服务
             this.setState({mac: mac, action: action})
             this.socket.emit("canConnect", {to: mac, from: this.socket.id,msg:action})
-
         } else {
             // alert("请输入服务器 mac 地址")
         }
@@ -180,7 +176,6 @@ class App extends Component {
                                         document.getElementById('video').srcObject = stream
                                         self.setState({localStream: stream})
                                         self.startConnect("push to file and stream")
-
                                     })
 
                             }}> 推流并保存文件->
@@ -189,11 +184,24 @@ class App extends Component {
                             <br/>
                             <br/>
                             <br/>
+                            <button disabled={!this.state.ready} onClick={() => this.startConnect("pull from stream")}> 拉流</button>
+                            <br/>
+                            <br/>
+                            <br/>
                             <button disabled={!this.state.ready} onClick={() => this.startConnect("pull from file")}> 播放视频文件</button>
                             <br/>
                             <br/>
                             <br/>
-                            <button disabled={!this.state.ready} onClick={() => this.startConnect("pull from stream")}> 拉流</button>
+                            <button disabled={!this.state.ready} onClick={() => {
+                                var self = this
+                                navigator.mediaDevices.getUserMedia({video: true})
+                                    .then(stream => {
+                                        document.getElementById('video').srcObject = stream
+                                        self.setState({localStream: stream})
+                                        self.startConnect("push to rtmp")
+                                    })
+
+                            }}> 推流rtmp</button>
                             <br/>
                             <br/>
                             <br/>
